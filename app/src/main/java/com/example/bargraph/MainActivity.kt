@@ -1,72 +1,203 @@
 package com.example.bargraph
 
+import android.graphics.Color
 import android.os.Bundle
-//import androidx.activity.en
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.graphics.blue
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.github.mikephil.charting.charts.BarChart
+import com.github.mikephil.charting.components.LimitLine
+import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.BarData
 import com.github.mikephil.charting.data.BarDataSet
 import com.github.mikephil.charting.data.BarEntry
-//added limit line import for max and min line
-import com.github.mikephil.charting.components.LimitLine
 import com.github.mikephil.charting.formatter.IndexAxisValueFormatter
 import com.google.firebase.firestore.FirebaseFirestore
-//imports for calendar - month stuff
 import java.text.SimpleDateFormat
 import java.util.*
-import android.graphics.Color
+import android.util.Log
 
 
 class MainActivity : AppCompatActivity() {
     private lateinit var barChart: BarChart
-    private val firestore = FirebaseFirestore.getInstance()
+    private lateinit var firestore: FirebaseFirestore
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         //enableEdgeToEdge()
         setContentView(R.layout.activity_main)
-
-        //variable
         barChart = findViewById(R.id.bar_chart)
+        firestore = FirebaseFirestore.getInstance()
 
-        //calendar
+        // Test data
+        val testData = listOf(
+            StudyEntry("2024-06-01", 4f),
+            StudyEntry("2024-06-02", 5f),
+            StudyEntry("2024-06-03", 6f)
+        )
+        displayBarChart(testData, minGoal = 2, maxGoal = 5)
+
+        // Fetch data from Firestore
+        fetchStudyData("2024-06-01", "2024-06-30")
+    }
+
+    private fun displayBarChart(studyData: List<StudyEntry>, minGoal: Int, maxGoal: Int) {
+        val entries = mutableListOf<BarEntry>()
+        val labels = mutableListOf<String>()
         val calendar = Calendar.getInstance()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val currentDate = dateFormat.format(calendar.time)
-        //getting each dat of the month and adding it to a set
-        calendar.set(Calendar.DAY_OF_MONTH, 1)
-        val firstDate = dateFormat.format(calendar.time)
 
-        //calling the function to fetch study data from Firestore
-        fetchStudyData(firstDate, currentDate)
+        for (i in studyData.indices) {
+            val date = studyData[i].date
+            val hours = studyData[i].hours
+            val dayOfMonth = dateFormat.parse(date)?.let {
+                calendar.time = it
+                calendar.get(Calendar.DAY_OF_MONTH).toFloat()
+            } ?: 0f
+            entries.add(BarEntry(dayOfMonth, hours))
+            labels.add(dayOfMonth.toString())
+        }
 
+        val dataSet = BarDataSet(entries, "TotalHrs")
+        dataSet.color = Color.BLUE
+        dataSet.valueTextColor = Color.BLACK
+        dataSet.valueTextSize = 10f
+        val data = BarData(dataSet)
+        data.barWidth = 0.9f
+
+        barChart.data = data
+        barChart.setFitBars(true)
+        //barChart.invalidate()
+
+        val xAxis = barChart.xAxis
+        xAxis.valueFormatter = IndexAxisValueFormatter(labels)
+        xAxis.granularity = 1f
+        xAxis.position = XAxis.XAxisPosition.BOTTOM
+        xAxis.setLabelCount(31, true)
+        xAxis.labelRotationAngle = -45f
+
+        val leftAxis = barChart.axisLeft
+        leftAxis.axisMinimum = 0f
+        leftAxis.axisMaximum = 24f
+
+        val rightAxis = barChart.axisRight
+        rightAxis.isEnabled = false
+
+        // Add limit lines for min and max goals
+        val maxGoalLine = LimitLine(maxGoal.toFloat())
+        maxGoalLine.lineColor = Color.RED
+        maxGoalLine.lineWidth = 2f
+        leftAxis.addLimitLine(maxGoalLine)
+
+        val minGoalLine = LimitLine(minGoal.toFloat())
+        minGoalLine.lineColor = Color.GREEN
+        minGoalLine.lineWidth = 2f
+        leftAxis.addLimitLine(minGoalLine)
+
+        barChart.description.isEnabled = false
+        barChart.legend.isEnabled = false
+        barChart.setDrawGridBackground(false)
+        barChart.animateY(1000)
+       // barChart.invalidate()
     }
 
     private fun fetchStudyData(startDate: String, endDate: String) {
+        firestore.collection("daily_entries")
+           // .whereGreaterThanOrEqualTo("entryDate", startDate)
+            //.whereLessThanOrEqualTo("entryDate", endDate)
+            .get()
+            .addOnSuccessListener { documents ->
+                val studyData = mutableListOf<StudyEntry>()
+                val completeData = mutableMapOf<String, Float>()
+                var minGoal = 0
+                var maxGoal = 0
+
+                for (document in documents) {
+                    val date = document.getString("entryDate") ?: continue
+                    val totalHours = document.getDouble("TotalHrs") ?: 0.0
+                    minGoal = document.getDouble("MinGoals")?.toInt() ?: minGoal
+                    maxGoal = document.getDouble("MaxGoals")?.toInt() ?: maxGoal
+                    completeData[date] = totalHours.toFloat()
+
+                    // Log retrieved data
+                    Log.d("FirestoreData", "Date: $date, TotalHours: $totalHours, MinGoal: $minGoal, MaxGoal: $maxGoal")
+                }
+
+                val calendar = Calendar.getInstance()
+                calendar.time = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(startDate)!!
+                while (calendar.time.before(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(endDate)!!) || calendar.time.equals(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(endDate)!!)) {
+                    val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+                    if (!completeData.containsKey(date)) {
+                        completeData[date] = 0f
+                    }
+                    calendar.add(Calendar.DAY_OF_MONTH, 1)
+                }
+
+                for ((date, hours) in completeData.toSortedMap()) {
+                    studyData.add(StudyEntry(date, hours))
+                }
+
+                displayBarChart(studyData, minGoal, maxGoal)
+            }
+            .addOnFailureListener { exception ->
+                // Log error
+                Log.e("FirestoreError", "Error fetching data", exception)
+            }
+    }
+
+    data class StudyEntry(val date: String, val hours: Float)
+}
+
+
+
+        //this is user input, it works, but its not pulling from firestore
+       /* barChart = findViewById(R.id.bar_chart)
+
+        val calendar = Calendar.getInstance()
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val currentDate = dateFormat.format(calendar.time)
+        calendar.set(Calendar.DAY_OF_MONTH, 1)
+        val firstDate = dateFormat.format(calendar.time)
+
+        fetchStudyData(firstDate, currentDate)
+    }
+
+    private fun fetchStudyData(startDate: String, endDate: String) {
+
+
         firestore.collection("daily_entries")
             .whereGreaterThanOrEqualTo("entryDate", startDate)
             .whereLessThanOrEqualTo("entryDate", endDate)
             .get()
             .addOnSuccessListener { documents ->
                 val studyData = mutableListOf<StudyEntry>()
-                var minGoal = 0
+                val completeData = mutableMapOf<String, Float>()
+                var minGoal =0
                 var maxGoal = 0
-//i named min and max incorrectly in firebase so its just all going to be plurals >_< (crying emoji)
+
                 for (document in documents) {
                     val date = document.getString("entryDate") ?: continue
-                    //checking if there is an entry for that date ---> if not then sets tHrs to 0
                     val totalHours = document.getDouble("TotalHrs") ?: 0.0
                     minGoal = document.getDouble("MinGoals")?.toInt() ?: minGoal
                     maxGoal = document.getDouble("MaxGoals")?.toInt() ?: maxGoal
-                    studyData.add(StudyEntry(date, totalHours.toFloat()))
+                    completeData[date] = totalHours.toFloat()
+                }
+
+                val calendar = Calendar.getInstance()
+                calendar.time = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(startDate)!!
+                while (calendar.time.before(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(endDate)!!) || calendar.time.equals(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(endDate)!!)) {
+                    val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+                    if (!completeData.containsKey(date)) {
+                        completeData[date] = 0f
+                    }
+                    calendar.add(Calendar.DAY_OF_MONTH, 1)
+                }
+
+                for ((date, hours) in completeData.toSortedMap()) {
+                    studyData.add(StudyEntry(date, hours))
                 }
 
                 displayBarChart(studyData, minGoal, maxGoal)
             }
             .addOnFailureListener { exception ->
-                //maybe i'll add in some error handling, just want to get this working first
+                Log.e("MainActivity", "Error getting documents: ", exception)
             }
     }
 
@@ -76,32 +207,56 @@ class MainActivity : AppCompatActivity() {
 
         for (i in studyData.indices) {
             val date = studyData[i].date
+            val day = date.substring(date.length - 2).toInt()
             val hours = studyData[i].hours
-            entries.add(BarEntry(i.toFloat(), hours))
-            labels.add(date)
+            entries.add(BarEntry(day.toFloat(), hours))
+            labels.add(day.toString())
         }
 
         val dataSet = BarDataSet(entries, "Study Hours")
+        dataSet.color = Color.BLUE
         val data = BarData(dataSet)
+        data.barWidth = 0.9f
 
         barChart.data = data
-        barChart.xAxis.valueFormatter = IndexAxisValueFormatter(labels)
-        barChart.xAxis.granularity = 1f
-        barChart.axisLeft.axisMinimum = 0f
+
+        val xAxis = barChart.xAxis
+        xAxis.valueFormatter = IndexAxisValueFormatter(labels)
+        xAxis.granularity = 1f
+        xAxis.position = XAxis.XAxisPosition.BOTTOM
+        xAxis.setLabelCount(31, true)
+        xAxis.axisMinimum = 1f
+        xAxis.axisMaximum = 31f
+        xAxis.labelRotationAngle = -45f // Rotate labels for better readability
+
+        val leftAxis = barChart.axisLeft
+        leftAxis.axisMinimum = 0f
+        leftAxis.axisMaximum = 24f // Hours range from 0 to 24
+
+        val rightAxis = barChart.axisRight
+        rightAxis.isEnabled = false
+
+        // Add limit lines for min and max goals without labels
+        val maxGoalLine = LimitLine(maxGoal.toFloat())
+        maxGoalLine.lineColor = Color.RED
+        maxGoalLine.lineWidth = 2f
+        leftAxis.addLimitLine(maxGoalLine)
+
+        val minGoalLine = LimitLine(minGoal.toFloat())
+        minGoalLine.lineColor = Color.GREEN
+        minGoalLine.lineWidth = 2f
+        leftAxis.addLimitLine(minGoalLine)
 
         barChart.description.isEnabled = false
         barChart.legend.isEnabled = false
         barChart.setFitBars(true)
-        barChart.axisLeft.axisMinimum = 0f
-        barChart.axisRight.isEnabled = false
-        barChart.xAxis.isEnabled = true
         barChart.setDrawGridBackground(false)
         barChart.animateY(1000)
-
         barChart.invalidate()
     }
+
     data class StudyEntry(val date: String, val hours: Float)
-}
+}*/
 
 //hi this is old display graph method, asked chat to change it so the one above is the updated version from chat
 /*private fun displayBarChart(studyData: List<StudyEntry>, minGoal: Int, maxGoal: Int) {
@@ -153,7 +308,6 @@ entries.add(BarEntry(2f, 20f))
 entries.add(BarEntry(3f, 30f))
 entries.add(BarEntry(4f, 40f))
 entries.add(BarEntry(5f, 50f))
-
 val dataSet = BarDataSet(entries, "Bar Data Set")
 dataSet.color.blue
 val data = BarData(dataSet)
