@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1049254212606",
+    "project_id": "opsc-poe-my-tester",
+    "storage_bucket": "opsc-poe-my-tester.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1049254212606:android:2bd36aae1bf8357dcd06af",
+        "android_client_info": {
+          "package_name": "com.example.bargraph"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC18jNrG6b2H4Ry7FmDyNpt3ugwGRBuEZM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
